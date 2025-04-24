@@ -1,0 +1,25 @@
+stages:
+  - delegate
+
+include_linter_c:
+  stage: delegate
+  trigger:
+    include: linter/c/.gitlab-ci.yml
+    strategy: depend
+  rules:
+    - changes:
+        - linter/c/**/*       # all nested files
+        - linter/c/*          # top-level files
+    - when: never  # fallback if no matching change
+
+include_linter_cpp:
+  stage: delegate
+  trigger:
+    include: linter/cpp/.gitlab-ci.yml
+    strategy: depend
+  rules:
+    - changes:
+        - linter/cpp/**/*       # all nested files
+        - linter/cpp/*          # top-level files
+    - when: never  # fallback if no matching change
+

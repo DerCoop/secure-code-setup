@@ -1,0 +1,91 @@
+variables:
+  IMAGE_NAME: $CI_REGISTRY_IMAGE:${CI_COMMIT_REF_SLUG}_c
+image: $IMAGE_NAME
+
+stages:
+  - prep_env
+  - build
+  - lint
+
+.dockerLogin:
+  image: docker:stable
+  stage: prep_env
+  services:
+    - docker:dind
+  before_script:
+    - cp /opt/ssl/certs/* /etc/ssl/certs
+    - update-ca-certificates
+    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
+
+.buildOrUpdateContainer:
+  extends: .dockerLogin
+  script:
+    - if [ -n $ENSURE_CONTAINER && "$ENSURE_CONTAINER" == "true" ] ; then docker pull $IMAGE_NAME > /dev/null && exit 0; fi
+    - if [ -z $ENSURE_CONTAINER ] ; then docker pull $IMAGE_NAME > /dev/null || true; fi
+    - docker build -f linter/c/Dockerfile_clang --cache-from $IMAGE_NAME -t $IMAGE_NAME .
+    - docker push $IMAGE_NAME
+
+# The idea is to:
+# * update(build) the container everytime on merge request because gitlab see only "all changes"
+#     within the MR.
+# * On commits, we build only if the dockerfile change (and maybe more)
+updateContainer:
+  extends: .buildOrUpdateContainer
+  rules:
+    - changes:
+        - linter/c/Dockerfile_clang
+
+# if we won't build the container, we check if there is one, else.... build it....
+ensureContainer:
+  extends: .buildOrUpdateContainer
+  rules:
+    - changes:
+        - linter/c/Dockerfile_clang
+      when: never
+    - when: always
+  variables:
+    ENSURE_CONTAINER: "true"
+
+build:
+  stage: build
+  script:
+    - cd linter/c/
+    - cmake -S . -B build -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+  rules:
+    - changes:
+        - linter/cpp/src/*.cpp
+        - linter/cpp/src/*.hpp
+        - linter/cpp/src/*.h
+        - linter/cpp/.clang-tidy
+  artifacts:
+    paths:
+      - linter/c/build
+
+lint:
+  stage: lint
+  # run cmake to generate compile_commands.json, which clang-tidy uses to understand your code's include paths, flags, macros, etc.
+  needs: ["build"]
+  before_script:
+    - cd linter/c/
+    - cp .clang-tidy build/
+  script:
+    - clang-tidy -p build $(find src -name '*.c')
+  rules:
+    - changes:
+        - linter/c/src/*.[c|h]
+        - linter/c/.clang-tidy
+  artifacts:
+    paths:
+      - linter/c/build/
+
+format:
+  stage: lint
+  before_script:
+  # this is more or less your buildjob
+    - cd linter/c/
+  script:
+    - clang-format --verbose --dry-run -Werror src/*
+  rules:
+    - changes:
+        - linter/c/src/*.[c|h]
+        - linter/c/.clang-format
