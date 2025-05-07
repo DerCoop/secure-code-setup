@@ -1,0 +1,14 @@
+{
+    "rules": {
+      "RCS1118": "error",  // Mark local variable as const
+      "RCS1146": "error",  // Use conditional access
+      "RCS1080": "error",  // Use 'foreach' instead of 'for'
+      "RCS1036": "none",   // Remove unnecessary blank lines
+      "RCS1213": "warning" // Remove unused member declaration
+    },
+    "general": {
+      "maxLineLength": 120,
+      "prefixFieldIdentifierWithUnderscore": true
+    }
+  }
+  

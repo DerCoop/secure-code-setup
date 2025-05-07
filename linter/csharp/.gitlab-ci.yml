@@ -1,0 +1,70 @@
+variables:
+  IMAGE_NAME: $CI_REGISTRY_IMAGE:${CI_COMMIT_REF_SLUG}_dotnet
+image: $IMAGE_NAME
+
+stages:
+  - prep_env
+  - build
+  - lint
+
+.dockerLogin:
+  image: docker:stable
+  stage: prep_env
+  services:
+    - docker:dind
+  before_script:
+    - cp /opt/ssl/certs/* /etc/ssl/certs
+    - update-ca-certificates
+    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
+
+.buildOrUpdateContainer:
+  extends: .dockerLogin
+  script:
+    - if [ -n $ENSURE_CONTAINER && "$ENSURE_CONTAINER" == "true" ] ; then docker pull $IMAGE_NAME > /dev/null && exit 0; fi
+    - if [ -z $ENSURE_CONTAINER ] ; then docker pull $IMAGE_NAME > /dev/null || true; fi
+    - docker build -f linter/csharp/Dockerfile_dotnet --cache-from $IMAGE_NAME -t $IMAGE_NAME .
+    - docker push $IMAGE_NAME
+
+# The idea is to:
+# * update(build) the container everytime on merge request because gitlab see only "all changes"
+#     within the MR.
+# * On commits, we build only if the dockerfile change (and maybe more)
+updateContainer:
+  extends: .buildOrUpdateContainer
+  rules:
+    - changes:
+      - linter/csharp/Dockerfile_dotnet
+
+# if we won't build the container, we check if there is one, else.... build it....
+ensureContainer:
+  extends: .buildOrUpdateContainer
+  rules:
+    - changes:
+      - linter/csharp/Dockerfile_dotnet
+      when: never
+    - when: always
+  variables:
+    ENSURE_CONTAINER: "true"
+
+build:
+  stage: build
+  script:
+    - cd linter/csharp
+    - dotnet restore src/LinterDemo.csproj
+    # "--warnaserror" will fail the job if there are findings, the code_analysis job wil check dedicated
+    - dotnet build src/LinterDemo.csproj --no-restore #--warnaserror
+  rules:
+    - changes:
+        - linter/csharp/src/*
+
+code_analysis:
+  stage: lint
+  script:
+    - cd linter/csharp
+    - dotnet format src/LinterDemo.csproj --verify-no-changes
+    - roslynator analyze src/LinterDemo.csproj --severity-level warning 
+  rules:
+    - changes:
+        - linter/csharp/src/*
+        - linter/csharp/.editorconfig
+        - linter/csharp/.roslynator.json
